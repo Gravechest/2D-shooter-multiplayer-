@@ -1,4 +1,6 @@
 #include <windows.h>
+#include <stdio.h>
+#include <intrin.h>
 
 WSADATA data;
 SOCKET sock;
@@ -51,12 +53,15 @@ typedef struct{
 }BULLET;
 
 typedef struct{
-	char id;
-	char c;
-	unsigned short rx[8];
-	unsigned short ry[8];
+	unsigned char id;
+	unsigned char Cid;
+	unsigned char c;
+	char rx[8];
+	char ry[8];
 	unsigned short x[8];
 	unsigned short y[8];
+	char vx[8];
+	char vy[8];
 }PLAYER;
 
 PLAYER players;
@@ -67,6 +72,7 @@ unsigned char serverdata[1024];
 
 BITMAPINFO bmi = { sizeof(BITMAPINFOHEADER),700,700,1,24,BI_RGB};
 char *vram;
+char *map;
 
 HWND window;
 MSG Msg;
@@ -78,12 +84,21 @@ inline unsigned int c2vram(unsigned int x,unsigned int y,unsigned int c){
 	return x*700*3+y*3+c;
 }
 
-inline float fabsf(float x){
+inline float fabsft(float x){
 	if(x > 0.0){
 		return x;
 	}
 	else{
 		return -x;
+	}
+}
+
+inline float fmaxf(float x,float y){
+	if(x < y){
+		return y;
+	}
+	else{
+		return x;
 	}
 }
 
@@ -94,8 +109,8 @@ RAY rayCreate(float x,float y,float rx,float ry){
 	ray.vx		= rx;
 	ray.vy 		= ry;
 	
-	ray.deltax  = fabsf(1.0/ray.vx);
-	ray.deltay  = fabsf(1.0/ray.vy);
+	ray.deltax  = fabsft(1.0/ray.vx);
+	ray.deltay  = fabsft(1.0/ray.vy);
 
 	if(ray.vx < 0.0){
 		ray.stepx = -1;
@@ -142,8 +157,7 @@ IVEC2 getCurPos(){
 	return r;
 }
 
-float sqrtfl(float square)
-{
+float sqrtfl(float square){
     float root=square/3.0f;
     int i;
     if (square <= 0) return 0.0f;
@@ -214,22 +228,73 @@ void network(){
 		if(GetKeyState(0x41)&0x80){	
 			serverdata[0] |= 0x08;
 		}
-		send(sock,serverdata,1,0);
+		IVEC2 c = getCurPos();
+		c.x -= 350;
+		c.y -= 350;
+		VEC2 nc;
+		float mc = fmaxf(fabsft(c.x),fabsft(c.y));
+		nc.x = (float)c.x / mc;
+		nc.y = (float)c.y / mc;
+		nc.x *= 127.0f;
+		nc.y *= 127.0f;
+		serverdata[1] = nc.x;
+		serverdata[2] = nc.y;
+		send(sock,serverdata,3,0);
 		recv(sock,serverdata,1024,0);
 		players.c = serverdata[0];
 		for(int i = 0;i < players.c;i++){
-			players.x[i] =  serverdata[i*5+1];
-			players.x[i] += serverdata[i*5+2]<<8;
-			players.y[i] =  serverdata[i*5+3];
-			players.y[i] += serverdata[i*5+4]<<8;
+			players.x[i]   = serverdata[i*9+1];
+			players.x[i]  += serverdata[i*9+2]<<8;
+			players.y[i]   = serverdata[i*9+3];
+			players.y[i]  += serverdata[i*9+4]<<8;
+			players.vx[i]  = serverdata[i*9+5];
+			players.vy[i]  = serverdata[i*9+6];
+			players.ry[i]  = serverdata[i*9+7];
+			players.rx[i]  = serverdata[i*9+8];
+			if(serverdata[i*9+9] == players.id){
+				players.Cid = i;
+			}
 		}
+	}
+}
+
+void prediction(){	
+	for(;;){
+		for(int i = 0;i < players.c;i++){
+			players.x[i] += players.vx[i];
+			players.y[i] += players.vy[i];
+		}	
+		Sleep(15);
 	}
 }
 
 void render(){
 	for(;;){
 		for(int i = 0;i < players.c;i++){
-			drawSphere(players.x[i],players.y[i],20);
+			IVEC2 rpos = {players.x[i]-players.x[players.Cid]+350,players.y[i]-players.y[players.Cid]+350};
+			drawSphere(rpos.x,rpos.y,20);
+			RAY ray = rayCreate(rpos.x,rpos.y,players.rx[i],players.ry[i]);
+			while(distance((VEC2){ray.ix,ray.iy},(VEC2){rpos.x,rpos.y})<40.0){
+				rayItterate(&ray);
+				vram[c2vram(ray.ix,ray.iy,0)] = 255;
+				vram[c2vram(ray.ix+1,ray.iy,0)] = 255;
+				vram[c2vram(ray.ix-1,ray.iy,0)] = 255;
+				vram[c2vram(ray.ix,ray.iy+1,0)] = 255;
+				vram[c2vram(ray.ix,ray.iy-1,0)] = 255;
+			}
+		}
+		for(int i = 0;i < 700;i++){
+			for(int i2 = 0;i2 < 700;i2++){
+				if(350-players.x[players.Cid]-i>0){
+					vram[c2vram(i,i2,1)] = 255;
+				}
+				else if(350-players.y[players.Cid]-i2>0){
+					vram[c2vram(i,i2,1)] = 255;
+				}
+				else if(map[(350+i+players.x[players.Cid]>>5)*32+(350+i2+players.y[players.Cid]>>5)] == 1){
+					vram[c2vram(i,i2,2)] = 255;
+				}
+			}
 		}
 		StretchDIBits(wndcontext,0,0,700,700,0,0,700,700,vram,&bmi,DIB_RGB_COLORS,SRCCOPY);
 		memset(vram,0,700*700*3);
@@ -238,6 +303,10 @@ void render(){
 
 void main(){
 	vram = HeapAlloc(GetProcessHeap(),8,700*700*3);
+	map  = HeapAlloc(GetProcessHeap(),8,32*32);
+	for(int i = 0;i < 32*32;i++){
+		map[i] = 1;
+	}
 	timeBeginPeriod(1);
 	wndclass.hInstance = GetModuleHandle(0);
 	RegisterClass(&wndclass);
@@ -246,6 +315,7 @@ void main(){
 
 	networkThread = CreateThread(0,0,network,0,0,0);
 	renderThread  = CreateThread(0,0,render,0,0,0);
+	CreateThread(0,0,prediction,0,0,0);
 	
 	for(;;){
 		while(PeekMessage(&Msg,window,0,0,0)){
