@@ -16,8 +16,8 @@ const unsigned int recvTimeOut = 300;
 
 typedef struct{
 	char input[8];
-	unsigned int rx[8];
-	unsigned int ry[8];
+	char rx[8];
+	char ry[8];
 	float x[8];
 	float y[8];
 	float vx[8];
@@ -31,30 +31,27 @@ void physics(){
 		int i2 = 0;
 		for(int i = 0;i < clientC && i2 < 8;i2++){
 			if(player.x[i2] && player.y[i2]){
-				if(player.input[i] & 0x01){
-					player.vx[i] += 0.35f;
+				if(player.input[i2] & 0x01){
+					player.vx[i2] += 0.35f;
 				}
-				if(player.input[i] & 0x02){
-					player.vx[i] -= 0.35f;
+				if(player.input[i2] & 0x02){
+					player.vx[i2] -= 0.35f;
 				}
-				if(player.input[i] & 0x04){
-					player.vy[i] += 0.35f;
+				if(player.input[i2] & 0x04){
+					player.vy[i2] += 0.35f;
 				}
-				if(player.input[i] & 0x08){
-					player.vy[i] -= 0.35f;
+				if(player.input[i2] & 0x08){
+					player.vy[i2] -= 0.35f;
 				}
-				player.x[i] += player.vx[i];
-				player.y[i] += player.vy[i];
-				player.vx[i] /= 1.04f;
-				player.vy[i] /= 1.04f;
+				player.x[i2] += player.vx[i2];
+				player.y[i2] += player.vy[i2];
+				player.vx[i2] /= 1.04f;
+				player.vy[i2] /= 1.04f;
+				i++;
 			}
 		}
 		Sleep(15);
 	}
-}
-
-void socketErrors(unsigned char id){
-
 }
 
 void communication(unsigned char *ID){
@@ -80,19 +77,25 @@ void communication(unsigned char *ID){
 			}	
 		}
 		player.input[id] = clientdata[id][0];
+		player.rx[id] = clientdata[id][1];
+		player.ry[id] = clientdata[id][2];
 		clientdata[id][0] = clientC;
 		int i2 = 0;
 		for(int i = 0;i < clientC && i2 < 8;i2++){
 			if(player.x[i2] && player.y[i2]){
-				clientdata[id][i*5+1] = (int)player.x[i];
-				clientdata[id][i*5+2] = (int)player.x[i]>>8;
-				clientdata[id][i*5+3] = (int)player.y[i];
-				clientdata[id][i*5+4] = (int)player.y[i]>>8;
-				clientdata[id][i*5+5] = i;
+				clientdata[id][i*9+1] = (int)player.x[i2];
+				clientdata[id][i*9+2] = (int)player.x[i2]>>8;
+				clientdata[id][i*9+3] = (int)player.y[i2];
+				clientdata[id][i*9+4] = (int)player.y[i2]>>8;
+				clientdata[id][i*9+5] = (int)player.vx[i2];
+				clientdata[id][i*9+6] = (int)player.vy[i2];
+				clientdata[id][i*9+7] = player.rx[i2];
+				clientdata[id][i*9+8] = player.ry[i2];
+				clientdata[id][i*9+9] = i2;
 				i++;
 			}
 		}
-		rs = send(client[id],clientdata[id],clientC*5+1,0);
+		rs = send(client[id],clientdata[id],clientC*9+1,0);
 		if(rs == -1 || rs == 0){
 			if(WSAGetLastError() == WSAECONNRESET){
 				printf("clientID:%i disconnected\n",id);
@@ -119,6 +122,7 @@ unsigned char searchServerSlot(){
 }
 
 void main(){
+	timeBeginPeriod(1);
 	CreateThread(0,0,physics,0,0,0);
 	WORD ver = MAKEWORD(2, 2);
 	WSAStartup(ver, &data);
